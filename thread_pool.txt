@@ -1,11 +1,11 @@
-#pragma onece
+#pragma once
 #ifndef THREAD_POOL_H
 #define THREAD_POOL_H
 
 #include<vector>
 #include<queue>
 #include<thread>
-#inlcude<atomic>  
+#include<atomic>  
 /*c++11 引入了原子操作的概念并通过这个新的头文件提供了多种原子操作数据类型，例如，
 atomic_bool,atomic_int等等，如果我们在多个线程中对这些类型的共享资源进行操作，编译
 器将保证这些操作都是原子性的，也就是说，确保任意时刻只有一个线程对这个资源进行访问，
@@ -24,4 +24,102 @@ atomic_bool,atomic_int等等，如果我们在多个线程中对这些类型的�
  供了更多的自由，我会在下面的内容中给大家介绍 unique_lock 的用法。*/
 #include<future>
 #include<functional>
-#inlcude<stdexcept>
+/*std::function是一个函数包装器模板，最早来自boost库，对应其boost::function函数包装
+器。在c++0x11中，将boost::function纳入标准库中。该函数包装器模板能包装任何类型的可调
+用元素（callable element），例如普通函数和函数对象。包装器对象可以进行拷贝，并且包装
+器类型仅仅只依赖于其调用特征（call signature），而不依赖于可调用元素自身的类型。一个
+std::function类型对象实例可以包装下列这几种可调用元素类型：函数、函数指针、类成员函数
+指针或任意类型的函数对象（例如定义了operator()操作并拥有函数闭包）。std::function对象
+可被拷贝和转移，并且可以使用指定的调用特征来直接调用目标元素。当std::function对象未包
+裹任何实际的可调用元素，调用该std::function对象将抛出std::bad_function_call异常。*/
+#include<stdexcept>
+namespace std
+{
+#define MAX_THREAD_NUM 256
+class threadpool
+{
+		using Task = function<void()>;
+		//线程池
+		vector<thread> pool;
+		//任务队列
+		queue<Task> tasks;
+		//同步
+		mutex m_lock;
+		//条件阻塞
+		condition_variable cv_task;
+		//是否关闭提交
+		atomic<bool> stoped;
+		//空闲线程数量
+		atomic<int> idlThrNum;
+	public:
+		inline threadpool(unsigned short size = 4) :stoped{ false }
+		{
+			idlThrNum = size < 1 ? 1 : size;
+			for (size; size < idlThrNum; size++)
+			{
+				pool.emplace_back(
+					[this] 
+					{
+						while (!this->stoped)
+						{
+							function<void()> task;
+							{
+								unique_lock<mutex> lock{ this->m_lock };
+								this->cv_task.wait(lock,
+								[this] 
+								{
+									return this->stoped.load() || !this->tasks.empty();
+								});
+								if (this->stoped && this->tasks.empty())
+									return;
+								task = move(this->tasks.front());
+								this->tasks.pop();
+							}
+							idlThrNum--;
+							task();
+							idlThrNum++;
+						}
+					}
+					);
+			
+			}
+		}
+		inline ~threadpool()
+		{
+			stoped.store(true);
+			cv_task.notify_all();
+			for (thread& thread : pool)
+			{
+				if (thread.joinable())
+					thread.join();
+			}
+		}
+
+	public:
+		//提交一个任务
+		//调用.get()获取返回值会等待任务执行完，获取返回值
+		//有两种方法可以实现调用类成员
+		//一种是使用 bind: .commit(bind(&Dog::func,&dog))
+		//另外一种是 mem_fn : .commit(mem_fn(&Dog::func, &dog))
+		template<class F, class ...args>
+		auto commit(F && f, Args&&...args)->future<decltype(f(args...))>
+		{
+			if (stoped.load())
+				throw runtime_error("commit on ThreadPool is stopped");
+			using RetType = decltype(f(args...));
+			auto task = make_shared<packaged_task<RetType()>>
+				(bind(forward<F>(f), forward<Args>(args)...));
+			future<RetType> future = task->get_future();
+			{
+				lock_guard<mutex> lock(m_lock);
+				tasks.emplace([task]() {(*task)(); });
+			}
+			cv_task.notify_one();
+			return future;
+		}
+		int idlCount() { return idlThrNum; }
+};
+};
+#endif
+
+

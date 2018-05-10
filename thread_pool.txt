@@ -1,0 +1,27 @@
+#pragma onece
+#ifndef THREAD_POOL_H
+#define THREAD_POOL_H
+
+#include<vector>
+#include<queue>
+#include<thread>
+#inlcude<atomic>  
+/*c++11 引入了原子操作的概念并通过这个新的头文件提供了多种原子操作数据类型，例如，
+atomic_bool,atomic_int等等，如果我们在多个线程中对这些类型的共享资源进行操作，编译
+器将保证这些操作都是原子性的，也就是说，确保任意时刻只有一个线程对这个资源进行访问，
+编译器将保证，多个线程访问这个共享资源的正确性。*/
+#include<condition_variable>
+/*C++11的标准库中新增加的条件变量的实现，与pthread的实现语义完全一致。使用条件变量
+做并发控制时，某一时刻阻塞在一个条件变量上的各个线程应该在调用wait操作时指明同一个
+互斥锁，此时该条件变量与该互斥锁绑定；否则程序的行为未定义。条件变量必须与互斥锁配
+合使用，其理由是程序需要判定某个条件(condition或称predict)是否成立，该条件可以是任
+意复杂。*/
+/*
+值得注意的是，unique_lock 对象同样也不负责管理 Mutex 对象的生命周期，unique_lock 对
+象只是简化了 Mutex 对象的上锁和解锁操作，方便线程对互斥量上锁，即在某个 unique_lock
+ 对象的声明周期内，它所管理的锁对象会一直保持上锁状态；而 unique_lock 的生命周期结束
+ 之后，它所管理的锁对象会被解锁，这一点和 lock_guard 类似，但 unique_lock 给程序员提
+ 供了更多的自由，我会在下面的内容中给大家介绍 unique_lock 的用法。*/
+#include<future>
+#include<functional>
+#inlcude<stdexcept>

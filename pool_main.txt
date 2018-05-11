@@ -1,0 +1,78 @@
+/**/
+#include "thread_pool.h"
+#include <iostream>
+using namespace std;
+
+int fun1(int slp)
+{
+	printf("this is fun1 id is %d\n", this_thread::get_id());
+	this_thread::sleep_for(chrono::seconds(3));
+	return slp;
+}
+
+struct gfun {
+	int operator()(int n) {
+		printf("this is fang fun id is %d\n", this_thread::get_id());
+		this_thread::sleep_for(chrono::seconds(2));
+		return 1;
+	}
+};
+
+class A {
+public:
+	static int Afun(int n = 0) {
+		printf("this is Afun id is %d\n", this_thread::get_id());
+		this_thread::sleep_for(chrono::seconds(1));
+		return n;
+	}
+
+	static std::string Bfun(int n, std::string str, char c) {
+		printf("this is Bfun id is %d\n", this_thread::get_id());
+		return str;
+	}
+};
+
+int main()
+{
+	try {
+		threadpool executor(20);
+		future<int> ff = executor.commit(fun1, 1);
+		printf("this is main id is %d ,idlesize is %d\n", this_thread::get_id(), executor.idlCount());
+		future<int> fg = executor.commit(gfun(), 2);
+		printf("this is main id is %d ,idlesize is %d\n", this_thread::get_id(), executor.idlCount());
+		future<int> gg = executor.commit(A::Afun, 3);
+		future<string> gh = executor.commit(A::Bfun, 4, "A::Bfun", 123);
+		future<string> fh = executor.commit([]()->string {printf("this is Lambfun id is %d\n", this_thread::get_id()); return "hello"; });
+		printf("this is main sleeping id is %d, idlesize is %d\n", this_thread::get_id(), executor.idlCount());
+		this_thread::sleep_for(chrono::microseconds(900));
+		vector<future<int>> vp;
+		for (int i = 0; i<10; i++)
+		{
+			executor.commit(fun1, 1);
+		}
+		printf("this is main id is %d ,idlesize is %d\n", this_thread::get_id(), executor.idlCount());
+		printf("this is main sleeping id is %d\n", this_thread::get_id());
+		this_thread::sleep_for(chrono::seconds(3));
+		ff.get();
+		printf("this is main id is %d ,idlesize is %d\n", this_thread::get_id(), executor.idlCount());
+		vector<future<int>> results;
+		for (int i = 0; i<8; i++)
+		{
+			results.emplace_back(executor.commit([i] {printf("emplace_back %d\n",i);
+			this_thread::sleep_for(chrono::seconds(10));
+			return i*i; })
+			);
+
+		}
+		printf("this is main id is %d ,idlesize is %d\n", this_thread::get_id(), executor.idlCount());
+		for (auto && result : results)
+			printf("result is %d\n",result.get());
+		return 0;
+
+	}
+	catch (exception& e)
+	{
+		cout << "error happen" << this_thread::get_id() << e.what() << endl;
+
+	}
+}

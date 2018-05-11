@@ -1,7 +1,6 @@
 #pragma once
 #ifndef THREAD_POOL_H
 #define THREAD_POOL_H
-
 #include<vector>
 #include<queue>
 #include<thread>
@@ -35,7 +34,7 @@ std::function类型对象实例可以包装下列这几种可调用元素类型�
 #include<stdexcept>
 namespace std
 {
-#define MAX_THREAD_NUM 256
+#define MAX_THREAD_NUM 50
 class threadpool
 {
 		using Task = function<void()>;
@@ -52,47 +51,50 @@ class threadpool
 		//空闲线程数量
 		atomic<int> idlThrNum;
 	public:
-		inline threadpool(unsigned short size = 4) :stoped{ false }
+		inline threadpool(unsigned short size = 4)
 		{
 			idlThrNum = size < 1 ? 1 : size;
-			for (size; size < idlThrNum; size++)
+			for (; pool.size() < MAX_THREAD_NUM && size>0; size--)
 			{
+			//将执行函数的线程压入线程池，即vector<thread>
 				pool.emplace_back(
-					[this] 
+				[this]
+				{
+					while (stoped)
 					{
-						while (!this->stoped)
+						Task task;//建立一个function<void()>，因为之前是lambda压入的。
 						{
-							function<void()> task;
+							unique_lock<mutex> lock{ this->m_lock };
+							//利用条件变量来进行值得修改
+							this->cv_task.wait(lock,
+							[this]
 							{
-								unique_lock<mutex> lock{ this->m_lock };
-								this->cv_task.wait(lock,
-								[this] 
-								{
-									return this->stoped.load() || !this->tasks.empty();
-								});
-								if (this->stoped && this->tasks.empty())
-									return;
-								task = move(this->tasks.front());
-								this->tasks.pop();
-							}
-							idlThrNum--;
-							task();
-							idlThrNum++;
+								return !stoped || !this->tasks.empty();
+							});
+							if (!stoped && this->tasks.empty())
+								return;
+							//右值引用里面的移动语义
+							task = move(this->tasks.front());
+							this->tasks.pop();
 						}
+						idlThrNum--;
+						task();
+						idlThrNum++;
 					}
-					);
-			
+				}
+				);
 			}
 		}
 		inline ~threadpool()
 		{
-			stoped.store(true);
+			stoped = false;
 			cv_task.notify_all();
 			for (thread& thread : pool)
 			{
 				if (thread.joinable())
 					thread.join();
 			}
+			//析构函数，对各个线程进行回收，防止出现僵尸线程。
 		}
 
 	public:
@@ -101,6 +103,7 @@ class threadpool
 		//有两种方法可以实现调用类成员
 		//一种是使用 bind: .commit(bind(&Dog::func,&dog))
 		//另外一种是 mem_fn : .commit(mem_fn(&Dog::func, &dog))
+		//利用泛型编程，自动推导类型。
 		template<class F, class ...Args>
 		auto commit(F && f, Args&&...args)->future<decltype(f(args...))>
 		{
@@ -108,13 +111,14 @@ class threadpool
 				throw runtime_error("commit on ThreadPool is stopped");
 			using RetType = decltype(f(args...));
 			auto task = make_shared<packaged_task<RetType()>>
-				(bind(forward<F>(f), forward<Args>(args)...));
-			future<RetType> fut = task->get_future();
+				(bind(forward<F>(f), forward<Args>(args)...));//建立一个智能指针。
+			future<RetType> fut = task->get_future();//为了获得相应函数的执行结果
 			{
+			//对公共资源进行加锁，同时利用{}进行作用域的限制，lock一旦退出作用域，自动析构会unlock(m_lock)
 				lock_guard<mutex> lock(m_lock);
 				tasks.emplace([task]() {(*task)(); });
 			}
-			cv_task.notify_one();
+			cv_task.notify_one();//唤醒一个阻塞线程。
 			return fut;
 		}
 		int idlCount() { return idlThrNum; }

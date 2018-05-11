@@ -32,4 +32,4 @@ int test_condition_variable_wait()
   
     return 0;  
 }  
-  
+lck意思是创建了一个对象，然后直接对对象进行上锁，如果对象析构，自动解锁。
